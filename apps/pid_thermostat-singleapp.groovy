@@ -34,15 +34,20 @@ preferences {
     section("Select Thermostat to control") {
         input "thermostat", "capability.thermostat", title: "Thermostat", required: true
     }
+    section("Select Setpoint Source:") {
+        input "setpointDevice", "capability.sensor", title: "Setpoint Device or Sensor", required: false
+        input "manualSetpoint", "decimal", title: "Manual Setpoint (If no device is specified)", required: false
+    }
     section("PID Parameters:") {
         input "P_parameter", "decimal", title: "Proportional Gain (P)", defaultValue: 0.25
         input "I_parameter", "decimal", title: "Integral Gain (I)", defaultValue: 0.00007
         input "D_parameter", "decimal", title: "Derivative Gain (D)", defaultValue: 0.1
-        input "delta_t", "number", title: "Update Interval (Seconds)", defaultValue: 60
     }
-    section("Setpoint and Threshold:") {
-        input "tempSetpoint", "decimal", title: "Setpoint Temperature", defaultValue: 18.5
-        input "tempThreshold", "decimal", title: "Temperature Delta Threshold", defaultValue: 4
+    section("Temperature Threshold:") {
+        input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
+    }
+    section("Cycle Time:") {}
+        input "cycleTime", "decimnal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes"
     }
 }
 
@@ -59,22 +64,40 @@ def updated() {
 
 def initialize() {
     state.W_control = 0.1
+    state.W_trimmed = 0.1
     state.e0 = 0
     state.e1 = 0
     state.e2 = 0
-    controlLoop()
+    state.d_on_or_off = false
+    runEvery1Minute(controlLoop)
 }
 
 def uninstalled() {
     logger("trace", "< uninstalled ---------------")
 }
 
+
 def controlLoop() {
+// since we are running once per minute, delta_t is 60
+    def delta_t = 60
     if (state.is_running) return
     state.is_running = true
 
     def Tm_measured = thermostat.currentTemperature
-    def Ts_setpoint = tempSetpoint
+    
+
+    if (setpointDevice) {
+        if (setpointDevice.hasCapability("thermostat")) {
+            Ts_setpoint = setpointDevice.currentHeatingSetpoint
+        } else if (setpointDevice.hasCapability("sensor")) {
+            Ts_setpoint = setpointDevice.currentValue("temperature")
+        }
+    } else if (manualSetpoint) {
+        Ts_setpoint = manualSetpoint
+    } else {
+        logger("error", "No valid setpoint source defined. Please specify a Setpoint Source or provide a Manual Setpoint.")
+        return
+    }
 
     state.e0 = Ts_setpoint - Tm_measured
     state.e2 = state.e1
@@ -87,8 +110,14 @@ def controlLoop() {
     def A1 = -1.0 * P_parameter - (2.0 * D_divide_dt)
     def A2 = D_divide_dt
 
-    def W_control = state.W_control + (A0 * state.e0) + (A1 * state.e1) + (A2 * state.e2)
-    state.W_control = Math.max(0.1, Math.min(0.9, W_control))
+    state W_control = state.W_control + (A0 * state.e0) + (A1 * state.e1) + (A2 * state.e2)
+    if (state.W_control > 0.9) {
+        state.W_trimmed = 1.0
+    } else if (state.W_control < 0.1) {
+        state.W_trimmed = 0
+    } else {
+        state.W_trimmed = state.W_control
+    }
 
     def TH_high = Ts_setpoint + tempThreshold
     def TL_low = Ts_setpoint - tempThreshold
@@ -101,5 +130,32 @@ def controlLoop() {
         thermostat.setHeatingSetpoint(TH_high)
     }
 
-    state.is_running = false
+    
+    def t_time = now() / 1000 // Current time in seconds
+    def where_in_cycle = (t_time % cycleTime) / cycleTime
+
+    if (where_in_cycle > state.W_trimmed && state.d_on_or_off == true) {
+        state.d_on_or_off = false
+        thermostat.setThermostatMode("heat")
+        thermostat.setHeatingSetpoint(TL_low)
+        thermostat.setThermostatFanMode("auto")
+    }
+
+    if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
+        state.d_on_or_off = true
+        thermostat.setThermostatMode("heat")
+        thermostat.setHeatingSetpoint(TH_high)
+        thermostat.setThermostatFanMode("auto")
+    }
+
+    // Anti reset windup at 20%
+    accumulator = (P_parameter * state.e0) + -0.2
+    if (state.W_control < accumulator) {
+        state.W_control = accumulator
+    }
+    accumulator = accumulator + 1.2
+    if (state.W_control > accumulator) {
+        state.W_control = accumulator
+    }
+
 }
