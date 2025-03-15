@@ -1,5 +1,5 @@
 /*
- *  PID Thermostat Child App
+ *  PID Thermostat App
  *  Project URL: https://github.com/jeabraham/hubitat_pid_thermostat
  *  Thanks to https://github.com/NelsonClark/Hubitat/tree/main/Apps/Advanced_vThermostat_V2
  *  Copyright 2025 John Abraham
@@ -46,7 +46,7 @@ preferences {
     section("Temperature Threshold:") {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
     }
-    section("Cycle Time:") {}
+    section("Cycle Time:") {
         input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
     }
 }
@@ -79,12 +79,6 @@ def updated() {
     log.info "PID parameters successfully updated: P=${P_parameter}, I=${I_parameter}, D=${D_parameter}, cycleTime=${cycleTime}."
 
     // Reschedule the control loop
-    runEvery1Minute(controlLoop)
-}
-
-
-def updated() {
-    unschedule()
     runEvery1Minute(controlLoop)
 }
 
@@ -193,5 +187,4 @@ def controlLoop() {
     if (state.W_control > accumulator) {
         state.W_control = accumulator
     }
-
 }
