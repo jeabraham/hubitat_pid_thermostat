@@ -47,13 +47,39 @@ preferences {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
     }
     section("Cycle Time:") {}
-        input "cycleTime", "decimnal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes"
+        input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
     }
 }
 
-def installed() {
-    initialize()
-    logger("trace", "--------------- installed >")
+def updated() {
+    unschedule()
+
+    // Validate PID parameters
+    if (P_parameter == null || P_parameter <= 0) {
+        log.error "Invalid Proportional Gain (P). Setting to default value of 0.25."
+        P_parameter = 0.25  // Default value
+    }
+
+    if (I_parameter == null || I_parameter < 0) {
+        log.error "Invalid Integral Gain (I). Setting to default value of 0.00007."
+        I_parameter = 0.00007  // Default value
+    }
+
+    if (D_parameter == null || D_parameter < 0) {
+        log.error "Invalid Derivative Gain (D). Setting to default value of 0.1."
+        D_parameter = 0.1  // Default value
+    }
+
+    // Validate cycleTime
+    if (cycleTime == null || cycleTime <= 0) {
+        log.error "Invalid cycleTime. Setting to default value of 1200 seconds."
+        cycleTime = 1200
+    }
+
+    log.info "PID parameters successfully updated: P=${P_parameter}, I=${I_parameter}, D=${D_parameter}, cycleTime=${cycleTime}."
+
+    // Reschedule the control loop
+    runEvery1Minute(controlLoop)
 }
 
 
@@ -63,6 +89,7 @@ def updated() {
 }
 
 def initialize() {
+    unschedule()
     state.W_control = 0.1
     state.W_trimmed = 0.1
     state.e0 = 0
@@ -74,14 +101,18 @@ def initialize() {
 
 def uninstalled() {
     logger("trace", "< uninstalled ---------------")
+    unschedule()
 }
 
+def disableApp() {
+    log.warn "App is being disabled. Stopping all scheduled tasks."
+    unschedule()
+}
 
 def controlLoop() {
 // since we are running once per minute, delta_t is 60
+    def Ts_setpoint
     def delta_t = 60
-    if (state.is_running) return
-    state.is_running = true
 
     def Tm_measured = thermostat.currentTemperature
     
@@ -99,6 +130,11 @@ def controlLoop() {
         return
     }
 
+    if (!Ts_setpoint) {
+        logger("error", "Setpoint device is missing required attributes. Please verify the device.")
+        return
+    }
+
     state.e0 = Ts_setpoint - Tm_measured
     state.e2 = state.e1
     state.e1 = state.e0
@@ -110,7 +146,7 @@ def controlLoop() {
     def A1 = -1.0 * P_parameter - (2.0 * D_divide_dt)
     def A2 = D_divide_dt
 
-    state W_control = state.W_control + (A0 * state.e0) + (A1 * state.e1) + (A2 * state.e2)
+    state.W_control = state.W_control + (A0 * state.e0) + (A1 * state.e1) + (A2 * state.e2)
     if (state.W_control > 0.9) {
         state.W_trimmed = 1.0
     } else if (state.W_control < 0.1) {
@@ -149,7 +185,7 @@ def controlLoop() {
     }
 
     // Anti reset windup at 20%
-    accumulator = (P_parameter * state.e0) + -0.2
+    def accumulator = (P_parameter * state.e0) + -0.2
     if (state.W_control < accumulator) {
         state.W_control = accumulator
     }
