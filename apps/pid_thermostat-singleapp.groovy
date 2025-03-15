@@ -43,8 +43,8 @@ preferences {
     }
     section("PID Parameters:") {
         input "P_parameter", "decimal", title: "Proportional Gain (P)", defaultValue: 0.25
-        input "I_parameter", "decimal", title: "Integral Gain (I)", defaultValue: 0.00007
-        input "D_parameter", "decimal", title: "Derivative Gain (D)", defaultValue: 0.1
+        input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*seconds", defaultValue: 0.00007
+        input "D_parameter", "decimal", title: "Derivative Gain (D) derivative in degrees per second", defaultValue: 0.1
     }
     section("Adjustable Parameters:") {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4

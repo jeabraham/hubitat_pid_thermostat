@@ -20,7 +20,7 @@ after the door has closed the slab is now way too hot, and the room overshoots i
 This app uses the well-known PID algorithm to figure out how much heating is needed as a percentage of the total capacity,
 and applies it for a percentage of the time, over the course of Cycle Time, which defaults to 1200s / 20 min.  So, if you
 need 15% heat, it will heat for the first 3 minutes of every 20 minutes.  If you need 50% heat, it will heat for the 
-first 10 minutes of every second.  The portion of heating is called the duty-cycle, and it's in the varaible W_control.
+first 10 minutes of every 20 minutes.  The portion of heating is called the duty-cycle, and it's in the variable W_control.
 
 This app is only useful if you find your heating system overreacting, overshooting or undershooting, or just want to smooth out 
 how it behaves.
@@ -47,7 +47,7 @@ and [Wikipedia article on Duty Cycle](https://en.wikipedia.org/wiki/Duty_cycle).
 
 ## **How It Works**
 
-The app adjusts the targeted thermostat’s `setpoint` by slightly raising or lowering its heating temperature based on a calculated control error. This control error is derived from the difference between the target setpoint (desired temperature) and actual measured temperature. Using the **PID control algorithm**, the app calculates a duty cycle to determine the fraction of time the thermostat should remain active versus inactive to achieve a steady state.
+The app adjusts the targeted thermostat, turning it on by setting its heating temperature to be `Temperature Threshold` above the `setpoint` to turn it on, or setting its heating temperature to be `Temperature Threshold` below the `setpoint` to turn it off.  Using the **PID control algorithm**, the app calculates a duty cycle to determine the fraction of time the thermostat should remain active versus inactive to achieve a steady state.  This duty cycle is adjusted by monitoring the difference between the target setpoint (desired temperature) and an actual measured temperature. 
 
 ### PID Parameters:
 - **Proportional Gain (P):** Reacts to the magnitude of the temperature error. Higher values lead to stronger reactions.
@@ -63,7 +63,6 @@ The app periodically (every minute) runs a control loop for continuous adjustmen
 ### Prerequisites
 - **Hubitat Elevation** smart home hub.
 - A compatible thermostat device connected to the Hubitat hub.
-- (Optional) External temperature sensor (e.g., smart thermostat or sensor device) for advanced setpoint control.
 - (Optional) a hubitat device such as a virtual thermostat (supporting the heatingSetpoint attribute) or some other temperature attribute, for you to adjust the desired temperature (otherwise you can set it in the app directly)
 
 ### Using the Script
@@ -94,20 +93,22 @@ During setup in Hubitat, you will be asked to configure the following:
 
 3. **Setpoint Source**  
    Specify how the setpoint is determined:
-    - Use a device (e.g., an external sensor's `heatingSetpoint` or `temperature`) for dynamic setpoint adjustments.
+    - Use a device which has a `heatingSetpoint` (e.g. a virtual thermostat) or `temperature` attribute for dynamic setpoint adjustments.
     - Manually input a setpoint value.
 
 4. **PID Parameters**  
-   Fine-tune the behavior of the PID controller:
+   Fine-tune the behavior of the PID controller.  Default values seem to work ok for thermostats in Celsius, they are probably too high for Fahrenheit. 
     - Proportional Gain (`P`) (Default: `0.25`)
-    - Integral Gain (`I`) (Default: `0.00007`)
-    - Derivative Gain (`D`) (Default: `0.1`)
+    - Integral Gain (`I`) applied to error integral in degrees * seconds (Default: `0.00007`)
+    - Derivative Gain (`D`) applied to change in error in degrees per second (Default: `0.1`)
+   
+Note that the Wikipedia article has tuning advice https://en.wikipedia.org/wiki/Proportional–integral–derivative_controller#Loop_tuning
 
 5. **Temperature Threshold**  
    Specify the temperature delta used to adjust the thermostat’s setpoint when cycling. (Default: `4` degrees)
 
 6. **Cycle Time**  
-   Define the time interval for the duty cycle in seconds. For example, a `1200`-second cycle will adjust the heat every 20 minutes. (Default: `1200` seconds)
+   Define the time interval for the duty cycle in seconds. For example, a `1200`-second cycle will adjust the heat every 20 minutes. Since the loop currently runs every minute, this should probably not be less than 600 seconds. (Default: `1200` seconds)
 
 ---
 
