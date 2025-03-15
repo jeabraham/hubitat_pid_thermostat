@@ -31,6 +31,9 @@ definition(
 )
 
 preferences {
+    section("Logging Level:") {
+        input "logLevel", "enum", title: "Select Log Level", options: ["trace", "debug", "info", "warn", "error"], defaultValue: "info", required: true
+    }
     section("Select Thermostat to control") {
         input "thermostat", "capability.thermostat", title: "Thermostat", required: true
     }
@@ -43,42 +46,73 @@ preferences {
         input "I_parameter", "decimal", title: "Integral Gain (I)", defaultValue: 0.00007
         input "D_parameter", "decimal", title: "Derivative Gain (D)", defaultValue: 0.1
     }
-    section("Temperature Threshold:") {
+    section("Adjustable Parameters:") {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
-    }
-    section("Cycle Time:") {
         input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
+    }
+}
+
+def logMessage(level, message) {
+    def levels = ["trace": 1, "debug": 2, "info": 3, "warn": 4, "error": 5]
+    def configuredLevel = levels[logLevel] ?: 3 // Default to "info" if not set
+
+    if (levels[level] >= configuredLevel) {
+        switch (level) {
+            case "trace":
+                log.trace message
+                break
+            case "debug":
+                log.debug message
+                break
+            case "info":
+                log.info message
+                break
+            case "warn":
+                log.warn message
+                break
+            case "error":
+                log.error message
+                break
+            default:
+                log.debug message
+                break
+        }
     }
 }
 
 def updated() {
     unschedule()
+    logMessage("info", "App updated. Unscheduling existing tasks and validating inputs...")
 
     // Validate PID parameters
     if (P_parameter == null || P_parameter <= 0) {
-        log.error "Invalid Proportional Gain (P). Setting to default value of 0.25."
-        P_parameter = 0.25  // Default value
+        logMessage("error", "Invalid Proportional Gain (P). Setting to default value of 0.25.")
+        P_parameter = 0.25
     }
 
     if (I_parameter == null || I_parameter < 0) {
-        log.error "Invalid Integral Gain (I). Setting to default value of 0.00007."
-        I_parameter = 0.00007  // Default value
+        logMessage("error", "Invalid Integral Gain (I). Setting to default value of 0.00007.")
+        I_parameter = 0.00007
     }
 
     if (D_parameter == null || D_parameter < 0) {
-        log.error "Invalid Derivative Gain (D). Setting to default value of 0.1."
-        D_parameter = 0.1  // Default value
+        logMessage("error", "Invalid Derivative Gain (D). Setting to default value of 0.1.")
+        D_parameter = 0.1
     }
 
     // Validate cycleTime
     if (cycleTime == null || cycleTime <= 0) {
-        log.error "Invalid cycleTime. Setting to default value of 1200 seconds."
+        logMessage("error", "Invalid cycleTime. Setting to default value of 1200 seconds.")
         cycleTime = 1200
     }
 
-    log.info "PID parameters successfully updated: P=${P_parameter}, I=${I_parameter}, D=${D_parameter}, cycleTime=${cycleTime}."
-
-    // Reschedule the control loop
+    logMessage("info", "PID parameters successfully updated: P=${P_parameter}, I=${I_parameter}, D=${D_parameter}, cycleTime=${cycleTime}.")
+    state.e0 = 0
+    state.e1 = 0
+    state.e2 = 0
+    if (state.d_on_or_off == null) {
+        state.d_on_or_off = false
+    }
     runEvery1Minute(controlLoop)
 }
 
@@ -104,34 +138,59 @@ def disableApp() {
 }
 
 def controlLoop() {
-// since we are running once per minute, delta_t is 60
-    def Ts_setpoint
+    logMessage("trace", "Starting control loop...")
+
+    if (state.W_control == null) {
+        logMessage("error", "state.W_control is null. Initializing to 0.1.")
+        state.W_control = 0.1
+    }
+
+    def Ts_setpoint = null
+    // since we are running once per minute, delta_t is 60
     def delta_t = 60
 
     def Tm_measured = thermostat.currentTemperature
-    
+    logMessage("debug", "Measured temperature: ${Tm_measured}")
 
     if (setpointDevice) {
-        if (setpointDevice.hasCapability("thermostat")) {
-            Ts_setpoint = setpointDevice.currentHeatingSetpoint
-        } else if (setpointDevice.hasCapability("sensor")) {
-            Ts_setpoint = setpointDevice.currentValue("temperature")
+        Ts_setpoint = setpointDevice.currentValue("heatingSetpoint")
+        if (Ts_setpoint != null) {
+            logMessage("debug", "Using setpointDevice's heatingSetpoint: ${Ts_setpoint}")
+        } else {
+            logMessage("debug", "setpointDevice does not have \"heatingSetpoint\", trying \"Temperature\"")
+            Ts_setpoint = setpointDevice.currentValue("Temperature")
+            if (Ts_setpoint != null) {
+                logMessage("debug", "Using setpointDevice's Temperature: ${Ts_setpoint}")
+            } else {
+              logMessage("error", "setpointDevice does not have \"heatingSetpoint\" nor \"Temperature\", it has ${setpointDevice.getSupportedAttributes()}")
+              return       
+            }
         }
     } else if (manualSetpoint) {
         Ts_setpoint = manualSetpoint
-    } else {
-        logger("error", "No valid setpoint source defined. Please specify a Setpoint Source or provide a Manual Setpoint.")
-        return
+        logMessage("debug", "Using manual setpoint: ${Ts_setpoint}")
     }
 
-    if (!Ts_setpoint) {
-        logger("error", "Setpoint device is missing required attributes. Please verify the device.")
+    // check if Ts_setpoint exists and is numeric
+    if (Ts_setpoint == null || !(Ts_setpoint.isNumber())) {
+        logMessage("error", "Setpoint is missing or is not numeric.")
         return
     }
 
     state.e0 = Ts_setpoint - Tm_measured
+    logMessage("trace", "Calculated error: ${state.e0}")
     state.e2 = state.e1
     state.e1 = state.e0
+
+    if (P_parameter == null || I_parameter == null || D_parameter == null) {
+           logMessage("error", "PID parameters are invalid. Exiting control loop.")
+           return
+       }
+
+    if (state.e0 == null || state.e1 == null || state.e2 == null) {
+         logMessage("error", "State error values (e0, e1, e2) are missing. Exiting control loop.")
+         return
+    }
 
     def I_times_dt = I_parameter * delta_t
     def D_divide_dt = D_parameter / delta_t
@@ -141,6 +200,9 @@ def controlLoop() {
     def A2 = D_divide_dt
 
     state.W_control = state.W_control + (A0 * state.e0) + (A1 * state.e1) + (A2 * state.e2)
+
+    logMessage("trace", "Calculated duty cycle W_control: ${state.W_control}")
+
     if (state.W_control > 0.9) {
         state.W_trimmed = 1.0
     } else if (state.W_control < 0.1) {
@@ -152,19 +214,11 @@ def controlLoop() {
     def TH_high = Ts_setpoint + tempThreshold
     def TL_low = Ts_setpoint - tempThreshold
 
-    if (state.W_control < 0.1) {
-        thermostat.setThermostatMode("heat")
-        thermostat.setHeatingSetpoint(TL_low)
-    } else if (state.W_control > 0.9) {
-        thermostat.setThermostatMode("heat")
-        thermostat.setHeatingSetpoint(TH_high)
-    }
-
-    
     def t_time = now() / 1000 // Current time in seconds
     def where_in_cycle = (t_time % cycleTime) / cycleTime
 
     if (where_in_cycle > state.W_trimmed && state.d_on_or_off == true) {
+        logMessage("trace", "Turning off (down) thermostat at cycle portion: ${where_in_cycle}")
         state.d_on_or_off = false
         thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TL_low)
@@ -172,6 +226,7 @@ def controlLoop() {
     }
 
     if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
+        logMessage("trace", "Turning on (up) thermostat at cycle portion: ${where_in_cycle}")
         state.d_on_or_off = true
         thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TH_high)
