@@ -172,10 +172,11 @@ def controlLoop() {
     }
 
     // check if Ts_setpoint exists and is numeric
-    if (Ts_setpoint == null || !(Ts_setpoint.isNumber())) {
+    if (Ts_setpoint == null || !(Ts_setpoint instanceof Number)) {
         logMessage("error", "Setpoint is missing or is not numeric.")
         return
     }
+
 
     state.e0 = Ts_setpoint - Tm_measured
     logMessage("trace", "Calculated error: ${state.e0}")
