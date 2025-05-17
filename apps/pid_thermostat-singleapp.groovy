@@ -178,10 +178,11 @@ def controlLoop() {
     }
 
 
-    state.e0 = Ts_setpoint - Tm_measured
-    logMessage("trace", "Calculated error: ${state.e0}")
     state.e2 = state.e1
     state.e1 = state.e0
+    state.e0 = Ts_setpoint - Tm_measured
+    logMessage("trace", "Calculated error: ${state.e0}")
+
 
     if (P_parameter == null || I_parameter == null || D_parameter == null) {
            logMessage("error", "PID parameters are invalid. Exiting control loop.")
