@@ -207,7 +207,7 @@ def controlLoop() {
     if (state.W_control > 0.9) {
         state.W_trimmed = 1.0
     } else if (state.W_control < 0.1) {
-        state.W_trimmed = 0
+        state.W_trimmed = 0.0
     } else {
         state.W_trimmed = state.W_control
     }
