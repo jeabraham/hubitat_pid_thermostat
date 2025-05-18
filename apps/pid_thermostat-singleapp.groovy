@@ -16,11 +16,9 @@
  *  Version History...
  *
  *  V0.1 First tries
- *  V0.2 Fancier
+ *  V0.2 Fancier, with 5 point second derivative using Savitzky-Golay approximation
  *
  */
-
-def history_size = 5
 
 definition(
     name: "PID Thermostat",
@@ -83,7 +81,30 @@ def logMessage(level, message) {
     }
 }
 
+private void validateErrorHistory() {
+    if (state.errors == null) {
+        logMessage("warn", "Initializing error history")
+        state.errors = new ArrayList<>(Collections.nCopies(state.HISTORY_SIZE, 0))
+        return
+    }
+
+    int currentSize = state.errors.size()
+    if (currentSize < state.HISTORY_SIZE) {
+        // Extend by duplicating last entry
+        def lastError = state.errors.isEmpty() ? 0 : state.errors.last()
+        for (int i = currentSize; i < state.HISTORY_SIZE; i++) {
+            state.errors.add(lastError)
+        }
+        logMessage("debug", "Extended error history from ${currentSize} to ${state.HISTORY_SIZE} entries")
+    } else if (currentSize > state.HISTORY_SIZE) {
+        // Reduce size by removing oldest entries
+        state.errors = state.errors.subList(0, state.HISTORY_SIZE)
+        logMessage("debug", "Trimmed error history from ${currentSize} to ${state.HISTORY_SIZE} entries")
+    }
+}
+
 def updated() {
+    state.HISTORY_SIZE = 5  // Also set in initialize()
     unschedule()
     logMessage("info", "App updated. Unscheduling existing tasks and validating inputs...")
 
@@ -110,7 +131,7 @@ def updated() {
     }
 
     logMessage("info", "PID parameters successfully updated: P=${P_parameter}, I=${I_parameter}, D=${D_parameter}, cycleTime=${cycleTime}.")
-    state.errors = new ArrayList<>(Collections.nCopies(history_size, 0))
+    validateErrorHistory()
     if (state.d_on_or_off == null) {
         state.d_on_or_off = false
     }
@@ -118,10 +139,11 @@ def updated() {
 }
 
 def initialize() {
+    state.HISTORY_SIZE = 5  // Also set in updated()
     unschedule()
     state.W_control = 0.1
     state.W_trimmed = 0.1
-    state.errors = new ArrayList<>(Collections.nCopies(history_size, 0))
+    validateErrorHistory()
     state.d_on_or_off = false
     runEvery1Minute(controlLoop)
 }
@@ -182,9 +204,14 @@ def controlLoop() {
         return
     }
 
+    if (state.errors == null) {
+        logMessage("warn", "state.errors was not initialized. Initializing with default values.")
+        state.errors = new ArrayList<>(Collections.nCopies(state.HISTORY_SIZE, 0))
+    }
+
     state.errors.add(0, Ts_setpoint - Tm_measured)
-    if (state.errors.size() > history_size) {
-        state.errors.removeAt(history_size)
+    if (state.errors.size() > state.HISTORY_SIZE) {
+        state.errors.removeAt(state.HISTORY_SIZE)
     }
     logMessage("trace", "Calculated error: ${state.errors[0]}")
 
