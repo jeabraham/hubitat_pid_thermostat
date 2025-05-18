@@ -19,6 +19,8 @@
  *
  */
 
+def history_size = 5
+
 definition(
     name: "PID Thermostat",
     namespace: "jeabraham",
@@ -107,9 +109,7 @@ def updated() {
     }
 
     logMessage("info", "PID parameters successfully updated: P=${P_parameter}, I=${I_parameter}, D=${D_parameter}, cycleTime=${cycleTime}.")
-    state.e0 = 0
-    state.e1 = 0
-    state.e2 = 0
+    state.errors = new ArrayList<>(Collections.nCopies(history_size, 0))
     if (state.d_on_or_off == null) {
         state.d_on_or_off = false
     }
@@ -120,9 +120,7 @@ def initialize() {
     unschedule()
     state.W_control = 0.1
     state.W_trimmed = 0.1
-    state.e0 = 0
-    state.e1 = 0
-    state.e2 = 0
+    state.errors = new ArrayList<>(Collections.nCopies(history_size, 0))
     state.d_on_or_off = false
     runEvery1Minute(controlLoop)
 }
@@ -183,7 +181,6 @@ def controlLoop() {
     state.e0 = Ts_setpoint - Tm_measured
     logMessage("trace", "Calculated error: ${state.e0}")
 
-
     if (P_parameter == null || I_parameter == null || D_parameter == null) {
            logMessage("error", "PID parameters are invalid. Exiting control loop.")
            return
@@ -225,7 +222,11 @@ def controlLoop() {
         thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TL_low)
         thermostat.setThermostatFanMode("auto")
+    state.errors.add(0, Ts_setpoint - Tm_measured)
+    if (state.errors.size() > history_size) {
+        state.errors.removeAt(history_size)
     }
+    logMessage("trace", "Calculated error: ${state.errors[0]}")
 
     if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
         logMessage("trace", "Turning on (up) thermostat at cycle portion: ${where_in_cycle}")
@@ -235,13 +236,11 @@ def controlLoop() {
         thermostat.setThermostatFanMode("auto")
     }
 
-    // Anti reset windup at 20%
-    def accumulator = (P_parameter * state.e0) + -0.2
-    if (state.W_control < accumulator) {
-        state.W_control = accumulator
-    }
-    accumulator = accumulator + 1.2
-    if (state.W_control > accumulator) {
-        state.W_control = accumulator
+    if (state.errors.size() < 5) {
+         logMessage("error", "Not enough error states for PID calculation. Exiting control loop.")
+         return
     }
 }
+    state.W_control = state.W_control + (A0 * state.errors[0]) + (A1 * state.errors[1]) + (A2 * state.errors[2])
+
+    def accumulator = (P_parameter * state.errors[0]) + -0.2
