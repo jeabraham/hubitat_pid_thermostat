@@ -44,8 +44,8 @@ preferences {
     }
     section("PID Parameters:") {
         input "P_parameter", "decimal", title: "Proportional Gain (P)", defaultValue: 0.25
-        input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*seconds", defaultValue: 0.00007
-        input "D_parameter", "decimal", title: "Derivative Gain (D) derivative in degrees per second", defaultValue: 0.1
+        input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*minutes", defaultValue: 0.002
+        input "D_parameter", "decimal", title: "Derivative Gain (D) derivative in degrees per minute", defaultValue: 0.3
     }
     section("Adjustable Parameters:") {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
@@ -104,7 +104,7 @@ private void validateErrorHistory() {
 }
 
 def updated() {
-    state.HISTORY_SIZE = 5  // Also set in initialize()
+    state.HISTORY_SIZE = 7  // Also set in initialize()
     unschedule()
     logMessage("info", "App updated. Unscheduling existing tasks and validating inputs...")
 
@@ -115,13 +115,13 @@ def updated() {
     }
 
     if (I_parameter == null || I_parameter < 0) {
-        logMessage("error", "Invalid Integral Gain (I). Setting to default value of 0.00007.")
-        I_parameter = 0.00007
+        logMessage("error", "Invalid Integral Gain (I). Setting to default value of 0.002.")
+        I_parameter = 0.002
     }
 
     if (D_parameter == null || D_parameter < 0) {
-        logMessage("error", "Invalid Derivative Gain (D). Setting to default value of 0.1.")
-        D_parameter = 0.1
+        logMessage("error", "Invalid Derivative Gain (D). Setting to default value of 0.3.")
+        D_parameter = 0.3
     }
 
     // Validate cycleTime
@@ -139,7 +139,7 @@ def updated() {
 }
 
 def initialize() {
-    state.HISTORY_SIZE = 5  // Also set in updated()
+    state.HISTORY_SIZE = 7  // Also set in updated()
     unschedule()
     state.W_control = 0.1
     state.W_trimmed = 0.1
@@ -167,8 +167,8 @@ def controlLoop() {
     }
 
     def Ts_setpoint = null
-    // since we are running once per minute, delta_t is 60
-    def delta_t = 60
+    // since we are running once per minute, delta_t is 1
+    def delta_t = 1
 
     def Tm_measured = thermostat.currentTemperature
 
@@ -234,9 +234,18 @@ def controlLoop() {
     state.W_control = state.W_control + I_times_dt + state.errors[0]
 
     // estimate second derivative using Savitsky-Golay smoothed estimate
-    def second_derivative = (-1*state.errors[0] + 16*state.errors[1] - 30*state.errors[2] + 16*state.errors[3]-1*state.errors[4])/ (12* delta_t * delta_t)
-    def D_influence = D_parameter * second_derivative * delta_t
-    logMessage("trace", "Calculated 2nd derivative as ${second_derivative} degrees/s^2 from ${state.errors}, influence on W is ${D_influence}")
+    def secondDerivSmoothed = (
+     2  * state.errors[0] +
+    -27 * state.errors[1] +
+    270 * state.errors[2] +
+   -490 * state.errors[3] +
+    270 * state.errors[4] +
+    -27 * state.errors[5] +
+     2  * state.errors[6]
+    ) / (180 * delta_t * delta_t)
+
+    def D_influence = D_parameter * secondDerivSmoothed * delta_t
+    logMessage("trace", "Calculated 2nd derivative as ${secondDerivSmoothed} degrees/m^2 from ${state.errors}, influence on W is ${D_influence}")
 
     // D parameter is influence of first derivative on W, so change in W is the second derivative
     state.W_control = state.W_control + D_influence
@@ -276,12 +285,14 @@ def controlLoop() {
     }
 
     // Anti reset windup at 20%
-    def accumulator = (P_parameter * state.errors[0]) + -0.2
-    if (state.W_control < accumulator) {
-        state.W_control = accumulator
+    def test = P_parameter * state.errors[0] - 0.2 - abs(D_influence)
+    if (state.W_control < test) {
+        logMessage("info", "Anti reset winddown, changing W control from ${state.W_control} to ${test}")
+        state.W_control = test
     }
-    accumulator = accumulator + 1.2
-    if (state.W_control > accumulator) {
-        state.W_control = accumulator
+    test = P_parameter * state.errors[0] + 1.2 + abs(D_influence)
+    if (state.W_control > test) {
+        logMessage("info", "Anti reset windup, changing W control from ${state.W_control} to ${test}")
+        state.W_control = test
     }
 }
