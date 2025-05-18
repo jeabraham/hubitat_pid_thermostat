@@ -149,12 +149,12 @@ def initialize() {
 }
 
 def uninstalled() {
-    logger("trace", "< uninstalled ---------------")
+    logMessage("trace", "Uninstalled")
     unschedule()
 }
 
 def disableApp() {
-    log.warn "App is being disabled. Stopping all scheduled tasks."
+    logMessage("warn", "App is being disabled. Stopping all scheduled tasks.")
     unschedule()
 }
 
