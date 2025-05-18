@@ -16,6 +16,7 @@
  *  Version History...
  *
  *  V0.1 First tries
+ *  V0.2 Fancier
  *
  */
 
@@ -197,11 +198,25 @@ def controlLoop() {
     def I_times_dt = I_parameter * delta_t
     def D_divide_dt = D_parameter / delta_t
 
-    def A0 = P_parameter + I_times_dt + D_divide_dt
-    def A1 = -1.0 * P_parameter - (2.0 * D_divide_dt)
-    def A2 = D_divide_dt
+    //def A0 = P_parameter + I_times_dt + D_divide_dt
+    //def A1 = -1.0 * P_parameter - (2.0 * D_divide_dt)
+    //def A2 = D_divide_dt
 
-    state.W_control = state.W_control + (A0 * state.errors[0]) + (A1 * state.errors[1]) + (A2 * state.errors[2])
+    // Update P amount, subtract old value add new value
+    state.W_control = state.W_control + P_parameter * (state.errors[0] - state.errors[1])
+
+    // Update integral, I, reset amount, add in the I
+    state.W_control = state.W_control + I_times_dt + state.errors[0]
+
+    // estimate second derivative using Savitsky-Golay smoothed estimate
+    def second_derivative = (-1*state.errors[0] + 16*state.errors[1] - 30*state.errors[2] + 16*state.errors[3]-1*state.errors[4])/ (12* delta_t * delta_t)
+    def D_influence = D_parameter * second_derivative * delta_t
+    logMessage("trace", "Calculated 2nd derivative as ${second_derivative} degrees/s^2 from ${state.errors}, influence on W is ${D_influence}")
+
+    // D parameter is influence of first derivative on W, so change in W is the second derivative
+    state.W_control = state.W_control + D_influence
+
+    //state.W_control = state.W_control + (A0 * state.errors[0]) + (A1 * state.errors[1]) + (A2 * state.errors[2])
 
     logMessage("trace", "Calculated duty cycle W_control: ${state.W_control}")
 
