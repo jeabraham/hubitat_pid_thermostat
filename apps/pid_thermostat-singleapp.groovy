@@ -44,7 +44,7 @@ preferences {
     }
     section("PID Parameters:") {
         input "P_parameter", "decimal", title: "Proportional Gain (P)", defaultValue: 0.25
-        input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*minutes", defaultValue: 0.002
+        input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*hours", defaultValue: 0.12
         input "D_parameter", "decimal", title: "Derivative Gain (D) derivative in degrees per minute", defaultValue: 0.3
     }
     section("Adjustable Parameters:") {
@@ -115,8 +115,8 @@ def updated() {
     }
 
     if (I_parameter == null || I_parameter < 0) {
-        logMessage("error", "Invalid Integral Gain (I). Setting to default value of 0.002.")
-        I_parameter = 0.002
+        logMessage("error", "Invalid Integral Gain (I). Setting to default value of 0.12.")
+        I_parameter = 0.12
     }
 
     if (D_parameter == null || D_parameter < 0) {
@@ -220,7 +220,7 @@ def controlLoop() {
          return
     }
 
-    def I_times_dt = I_parameter * delta_t
+    def I_times_dt = I_parameter / 60 * delta_t // I_parameter is in degree*hours, so we have to divide by 60
     def D_divide_dt = D_parameter / delta_t
 
     //def A0 = P_parameter + I_times_dt + D_divide_dt
@@ -285,12 +285,12 @@ def controlLoop() {
     }
 
     // Anti reset windup at 20%
-    def test = P_parameter * state.errors[0] - 0.2 - abs(D_influence)
+    def test = P_parameter * state.errors[0] - 0.2 - Math.abs(D_influence)
     if (state.W_control < test) {
         logMessage("info", "Anti reset winddown, changing W control from ${state.W_control} to ${test}")
         state.W_control = test
     }
-    test = P_parameter * state.errors[0] + 1.2 + abs(D_influence)
+    test = P_parameter * state.errors[0] + 1.2 + Math.abs(D_influence)
     if (state.W_control > test) {
         logMessage("info", "Anti reset windup, changing W control from ${state.W_control} to ${test}")
         state.W_control = test
