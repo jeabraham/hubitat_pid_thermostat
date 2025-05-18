@@ -149,6 +149,12 @@ def controlLoop() {
     def delta_t = 60
 
     def Tm_measured = thermostat.currentTemperature
+
+    if (Tm_measured == null || !(Tm_measured instanceof Number)) {
+            logMessage("error", "Thermostat temperature is not a valid number.")
+            return
+    }
+
     logMessage("debug", "Measured temperature: ${Tm_measured}")
 
     if (setpointDevice) {
@@ -181,14 +187,6 @@ def controlLoop() {
         state.errors.removeAt(history_size)
     }
     logMessage("trace", "Calculated error: ${state.errors[0]}")
-
-    if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
-        logMessage("trace", "Turning on (up) thermostat at cycle portion: ${where_in_cycle}")
-        state.d_on_or_off = true
-        thermostat.setThermostatMode("heat")
-        thermostat.setHeatingSetpoint(TH_high)
-        thermostat.setThermostatFanMode("auto")
-    }
 
     if (state.errors.size() < 5) {
          logMessage("error", "Not enough error states for PID calculation. Exiting control loop.")
