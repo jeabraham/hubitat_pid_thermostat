@@ -167,8 +167,8 @@ def controlLoop() {
     }
 
     def Ts_setpoint = null
-    // since we are running once per minute, delta_t is 1
-    def delta_t = 1
+    // since we are running once per minute, delta_t is 1.0 (note have to use 1.0 not 1!)
+    def delta_t = 1.0
 
     def Tm_measured = thermostat.currentTemperature
 
@@ -220,7 +220,8 @@ def controlLoop() {
          return
     }
 
-    def I_times_dt = I_parameter / 60 * delta_t // I_parameter is in degree*hours, so we have to divide by 60
+    // I_parameter is in degree*hours, so we have to divide by 60.0
+    def I_times_dt = I_parameter * delta_t / 60.0
     def D_divide_dt = D_parameter / delta_t
 
     //def A0 = P_parameter + I_times_dt + D_divide_dt
@@ -228,10 +229,14 @@ def controlLoop() {
     //def A2 = D_divide_dt
 
     // Update P amount, subtract old value add new value
-    state.W_control = state.W_control + P_parameter * (state.errors[0] - state.errors[1])
+    def P_change = P_parameter * (state.errors[0] - state.errors[1])
+    logMessage("trace", "P parameter changing W_control from ${state.W_control} by ${P_change}")
+    state.W_control = state.W_control + P_change
 
     // Update integral, I, reset amount, add in the I
-    state.W_control = state.W_control + I_times_dt + state.errors[0]
+    def I_change = I_times_dt * state.errors[0]
+    logMessage("trace", "I parameter ${I_times_dt} now changing W_control from ${state.W_control} by ${I_change}")
+    state.W_control = state.W_control + I_change
 
     // estimate second derivative using Savitsky-Golay smoothed estimate
     def secondDerivSmoothed = (
