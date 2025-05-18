@@ -175,19 +175,22 @@ def controlLoop() {
         return
     }
 
+    state.errors.add(0, Ts_setpoint - Tm_measured)
+    if (state.errors.size() > history_size) {
+        state.errors.removeAt(history_size)
+    }
+    logMessage("trace", "Calculated error: ${state.errors[0]}")
 
-    state.e2 = state.e1
-    state.e1 = state.e0
-    state.e0 = Ts_setpoint - Tm_measured
-    logMessage("trace", "Calculated error: ${state.e0}")
+    if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
+        logMessage("trace", "Turning on (up) thermostat at cycle portion: ${where_in_cycle}")
+        state.d_on_or_off = true
+        thermostat.setThermostatMode("heat")
+        thermostat.setHeatingSetpoint(TH_high)
+        thermostat.setThermostatFanMode("auto")
+    }
 
-    if (P_parameter == null || I_parameter == null || D_parameter == null) {
-           logMessage("error", "PID parameters are invalid. Exiting control loop.")
-           return
-       }
-
-    if (state.e0 == null || state.e1 == null || state.e2 == null) {
-         logMessage("error", "State error values (e0, e1, e2) are missing. Exiting control loop.")
+    if (state.errors.size() < 5) {
+         logMessage("error", "Not enough error states for PID calculation. Exiting control loop.")
          return
     }
 
@@ -198,7 +201,7 @@ def controlLoop() {
     def A1 = -1.0 * P_parameter - (2.0 * D_divide_dt)
     def A2 = D_divide_dt
 
-    state.W_control = state.W_control + (A0 * state.e0) + (A1 * state.e1) + (A2 * state.e2)
+    state.W_control = state.W_control + (A0 * state.errors[0]) + (A1 * state.errors[1]) + (A2 * state.errors[2])
 
     logMessage("trace", "Calculated duty cycle W_control: ${state.W_control}")
 
@@ -222,11 +225,7 @@ def controlLoop() {
         thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TL_low)
         thermostat.setThermostatFanMode("auto")
-    state.errors.add(0, Ts_setpoint - Tm_measured)
-    if (state.errors.size() > history_size) {
-        state.errors.removeAt(history_size)
     }
-    logMessage("trace", "Calculated error: ${state.errors[0]}")
 
     if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
         logMessage("trace", "Turning on (up) thermostat at cycle portion: ${where_in_cycle}")
@@ -236,11 +235,13 @@ def controlLoop() {
         thermostat.setThermostatFanMode("auto")
     }
 
-    if (state.errors.size() < 5) {
-         logMessage("error", "Not enough error states for PID calculation. Exiting control loop.")
-         return
+    // Anti reset windup at 20%
+    def accumulator = (P_parameter * state.errors[0]) + -0.2
+    if (state.W_control < accumulator) {
+        state.W_control = accumulator
+    }
+    accumulator = accumulator + 1.2
+    if (state.W_control > accumulator) {
+        state.W_control = accumulator
     }
 }
-    state.W_control = state.W_control + (A0 * state.errors[0]) + (A1 * state.errors[1]) + (A2 * state.errors[2])
-
-    def accumulator = (P_parameter * state.errors[0]) + -0.2
