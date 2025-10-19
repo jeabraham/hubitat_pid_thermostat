@@ -52,7 +52,7 @@ preferences {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
         input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
     }
-    section(title: sectionTitle("Connections")) {
+    section(title: "Connections") {
             input(name: "dutyCycleDevice", type: "capability.actuator", title: "Select Duty Cycle Hub Variable (display/output only)", required: false)
     }
 }
