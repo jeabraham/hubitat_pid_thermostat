@@ -17,6 +17,7 @@
  *
  *  V0.1 First tries
  *  V0.2 Fancier, with 5 point second derivative using Savitzky-Golay approximation
+ *  V1.0 Seems to be working well.  Let's add a hub variable connection to display our duty cycle.  
  *
  */
 
@@ -51,6 +52,9 @@ preferences {
         input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
         input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
     }
+    section(title: sectionTitle("Connections")) {
+            input(name: "dutyCycleDevice", type: "capability.actuator", title: "Select Duty Cycle Hub Variable (display/output only)", required: false)
+    }
 }
 
 def logMessage(level, message) {
@@ -78,6 +82,13 @@ def logMessage(level, message) {
                 log.debug message
                 break
         }
+    }
+}
+
+def updateDutyCycleVariable() {
+    if (dutyCycleDevice) {
+        def val = (state.W_control instanceof Number) ? Math.round(state.W_control * 100) : -1
+        dutyCycleDevice.setVariable(val)
     }
 }
 
@@ -300,4 +311,5 @@ def controlLoop() {
         logMessage("info", "Anti reset windup, changing W control from ${state.W_control} to ${test}")
         state.W_control = test
     }
+    updateDutyCycleVariable()
 }
