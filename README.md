@@ -99,8 +99,8 @@ During setup in Hubitat, you will be asked to configure the following:
 4. **PID Parameters**  
    Fine-tune the behavior of the PID controller.  Default values seem to work ok for thermostats in Celsius, they are probably too high for Fahrenheit. 
     - Proportional Gain (`P`) (Default: `0.25`)
-    - Integral Gain (`I`) applied to error integral in degrees * seconds (Default: `0.00007`)
-    - Derivative Gain (`D`) applied to change in error in degrees per second (Default: `0.1`)
+    - Integral Gain (`I`) applied to error integral in degrees * hours (Default: `0.12`)
+    - Derivative Gain (`D`) applied to change in error in degrees per minute (Default: `0.3`)
    
 Note that the Wikipedia article has tuning advice https://en.wikipedia.org/wiki/Proportional–integral–derivative_controller#Loop_tuning
 
