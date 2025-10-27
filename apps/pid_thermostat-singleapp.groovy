@@ -33,27 +33,36 @@ definition(
 )
 
 preferences {
-    section("Logging Level:") {
-        input "logLevel", "enum", title: "Select Log Level", options: ["trace", "debug", "info", "warn", "error"], defaultValue: "info", required: true
-    }
-    section("Select Thermostat to control") {
-        input "thermostat", "capability.thermostat", title: "Thermostat", required: true
-    }
-    section("Select Setpoint Source:") {
-        input "setpointDevice", "capability.sensor", title: "Setpoint Device or Sensor", required: false
-        input "manualSetpoint", "decimal", title: "Manual Setpoint (If no device is specified)", required: false
-    }
-    section("PID Parameters:") {
-        input "P_parameter", "decimal", title: "Proportional Gain (P)", defaultValue: 0.25
-        input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*hours", defaultValue: 0.12
-        input "D_parameter", "decimal", title: "Derivative Gain (D) derivative in degrees per minute", defaultValue: 0.3
-    }
-    section("Adjustable Parameters:") {
-        input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
-        input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
-    }
-    section(title: "Connections") {
-            input(name: "dutyCycleDevice", type: "capability.actuator", title: "Select Duty Cycle Hub Variable (display/output only)", required: false)
+    page(name: "mainPage")
+}
+
+def mainPage() {
+    dynamicPage(name: "mainPage", title: "PID Thermostat", install: true, uninstall: true) {
+        section("Logging Level:") {
+            input "logLevel", "enum", title: "Select Log Level", options: ["trace", "debug", "info", "warn", "error"], defaultValue: "info", required: true
+        }
+        section("Select Thermostat to control") {
+            input "thermostat", "capability.thermostat", title: "Thermostat", required: true
+        }
+        section("Select Setpoint Source:") {
+            input "setpointDevice", "capability.sensor", title: "Setpoint Device or Sensor", required: false
+            input "manualSetpoint", "decimal", title: "Manual Setpoint (If no device is specified)", required: false
+        }
+        section("PID Parameters:") {
+            input "P_parameter", "decimal", title: "Proportional Gain (P)", defaultValue: 0.25
+            input "I_parameter", "decimal", title: "Integral Gain (I), integral in degrees*hours", defaultValue: 0.12
+            input "D_parameter", "decimal", title: "Derivative Gain (D) derivative in degrees per minute", defaultValue: 0.3
+        }
+        section("Adjustable Parameters:") {
+            input "tempThreshold", "decimal", title: "Temperature delta applied to controlled thermostat to turn it on or off", defaultValue: 4
+            input "cycleTime", "decimal", title: "What is the cycle time in seconds? E.g. 1200 will turn the heat on for a portion of the time every 20 minutes", defaultValue:  1200
+        }
+        section(title: "Connections") {
+                input(name: "dutyCycleDevice", type: "capability.actuator", title: "Select Duty Cycle Hub Variable (display/output only)", required: false)
+        }
+        section(title: "Modes") {
+            input(name: "modes", type: "mode", title: "Set for specific Mode(s)", multiple: true, required: false)
+        }
     }
 }
 
@@ -171,6 +180,17 @@ def disableApp() {
 
 def controlLoop() {
     logMessage("trace", "Starting control loop...")
+    try {
+        def allowedModes = settings.modes
+        if (allowedModes && !allowedModes.contains(location.mode)) {
+            log.info "App paused: current mode '${location.mode}' not in allowed modes: ${allowedModes}"
+            return
+        } else {
+            log.debug "App running: current mode '${location.mode}' is in allowed modes: ${allowedModes}"
+        }
+    } catch (Throwable e) {
+        log.warn "Mode check failed: ${e.message}"
+    }
 
     if (state.W_control == null) {
         logMessage("error", "state.W_control is null. Initializing to 0.1.")
@@ -277,9 +297,16 @@ def controlLoop() {
     } else {
         state.W_trimmed = state.W_control
     }
-
+    
     def TH_high = Ts_setpoint + tempThreshold
     def TL_low = Ts_setpoint - tempThreshold
+
+    // TODO check against boundaries 
+	//def maxSetpoint = thermostat.currentValue("heatingSetpointRangeHigh") ?: 26.0
+	//def minSetpoint = thermostat.currentValue("heatingSetpointRangeLow") ?: 10.0
+
+	//TH_high = Math.min(TH_high, maxSetpoint)
+	//TL_low  = Math.max(TL_low, minSetpoint)
 
     def t_time = now() / 1000 // Current time in seconds
     def where_in_cycle = (t_time % cycleTime) / cycleTime
@@ -295,9 +322,10 @@ def controlLoop() {
 
         logMessage("info", "Turning OFF thermostat: (W_trimmed=${state.W_trimmed}, where_in_cycle=${where_in_cycle})")
         state.d_on_or_off = false
-        thermostat.setThermostatMode("heat")
+        // perhaps sending commands too quickly was confusing it, let's just send one. 
+        //thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TL_low)
-        thermostat.setThermostatFanMode("auto")
+        //thermostat.setThermostatFanMode("auto")
     }
 
     // ON Logic
@@ -308,9 +336,10 @@ def controlLoop() {
 
         logMessage("info", "Turning ON thermostat: (W_trimmed=${state.W_trimmed}, where_in_cycle=${where_in_cycle})")
         state.d_on_or_off = true
-        thermostat.setThermostatMode("heat")
+        // perhaps sending commands too quickly was confusing it, let's just send one. 
+        //thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TH_high)
-        thermostat.setThermostatFanMode("auto")
+        //thermostat.setThermostatFanMode("auto")
     }
 
     // Anti reset windup at 20%
