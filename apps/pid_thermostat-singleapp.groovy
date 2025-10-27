@@ -284,16 +284,29 @@ def controlLoop() {
     def t_time = now() / 1000 // Current time in seconds
     def where_in_cycle = (t_time % cycleTime) / cycleTime
 
-    if (where_in_cycle > state.W_trimmed && state.d_on_or_off == true) {
-        logMessage("trace", "Turning off (down) thermostat at cycle portion: ${where_in_cycle}")
+    def actualSetpoint = thermostat.currentHeatingSetpoint
+    def hysteresis = 0.5  // Degrees C tolerance to avoid reacting to small noise
+
+    // OFF Logic
+    // Normal Case: duty cycle says "off" (we're past the 'on' portion) and we believe it's currently on
+    // Recovery Case: we believe it's OFF, but actual setpoint is still HIGH → someone changed it
+    if ((where_in_cycle > state.W_trimmed && state.d_on_or_off == true) ||               // Normal turn-off
+        (state.d_on_or_off == false && actualSetpoint > TL_low + hysteresis)) {         // Recovery turn-off
+
+        logMessage("info", "Turning OFF thermostat: (W_trimmed=${state.W_trimmed}, where_in_cycle=${where_in_cycle})")
         state.d_on_or_off = false
         thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TL_low)
         thermostat.setThermostatFanMode("auto")
     }
 
-    if (where_in_cycle < state.W_trimmed && state.d_on_or_off == false) {
-        logMessage("trace", "Turning on (up) thermostat at cycle portion: ${where_in_cycle}")
+    // ON Logic
+    // Normal Case: duty cycle says "on" (we're inside the 'on' portion) and we believe it's currently off
+    // Recovery Case: we believe it's ON, but actual setpoint is still LOW → someone changed it
+    if ((where_in_cycle < state.W_trimmed && state.d_on_or_off == false) ||             // Normal turn-on
+        (state.d_on_or_off == true && actualSetpoint < TH_high - hysteresis)) {         // Recovery turn-on
+
+        logMessage("info", "Turning ON thermostat: (W_trimmed=${state.W_trimmed}, where_in_cycle=${where_in_cycle})")
         state.d_on_or_off = true
         thermostat.setThermostatMode("heat")
         thermostat.setHeatingSetpoint(TH_high)
