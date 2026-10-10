@@ -45,7 +45,10 @@ def mainPage() {
             input "thermostat", "capability.thermostat", title: "Thermostat", required: true
         }
         section("Select Setpoint Source:") {
-            input "setpointDevice", "capability.sensor", title: "Setpoint Device or Sensor", required: false
+            paragraph "<b>Recommended:</b> select a virtual thermostat (e.g. one created with Hubitat's \"Virtual Thermostat\" or \"Generic Component Thermostat\" driver). Its heating setpoint is used as the target, and its mode is linked to this app: when this app is paused the virtual thermostat's mode is set to <i>off</i>, setting it to <i>off</i> pauses this app indefinitely, and setting it to <i>heat</i> resumes this app."
+            input "setpointThermostat", "capability.thermostat", title: "Setpoint Virtual Thermostat (recommended)", required: false
+            paragraph "<i>Alternative (not recommended):</i> pick a temperature measurement device below and enter the set point manually in this app. You really should create a virtual thermostat instead; pause/resume mode syncing is only available with a virtual thermostat."
+            input "setpointDevice", "capability.sensor", title: "Alternative: Setpoint Device or Temperature Sensor", required: false
             input "manualSetpoint", "decimal", title: "Manual Setpoint (If no device is specified)", required: false
         }
         section("PID Parameters:") {
@@ -139,6 +142,36 @@ private void validateErrorHistory() {
     }
 }
 
+def getSetpointSource() {
+    return settings.setpointThermostat ?: settings.setpointDevice
+}
+
+private void setVirtualThermostatMode(mode) {
+    def dev = settings.setpointThermostat
+    if (!dev) return
+    try {
+        if (dev.currentValue("thermostatMode") == mode) return
+        if (mode == "off") dev.off() else dev.heat()
+    } catch (Throwable e) {
+        logMessage("warn", "Could not set mode ${mode} on ${dev}: ${e.message}")
+    }
+}
+
+def modeHandler(evt) {
+    logMessage("debug", "Setpoint thermostat mode changed to ${evt.value}")
+    if (evt.value == "off") {
+        if (!isPaused()) {
+            logMessage("info", "Setpoint thermostat set to off; pausing indefinitely.")
+            pauseIndefinitely()
+        }
+    } else if (evt.value == "heat") {
+        if (isPaused()) {
+            logMessage("info", "Setpoint thermostat set to heat; resuming.")
+            resumeApp()
+        }
+    }
+}
+
 def pauseStatusText() {
     if (state.pausedIndefinitely) return "Paused indefinitely"
     if (state.pausedUntil && now() < state.pausedUntil) return "Paused until ${new Date(state.pausedUntil as Long)}"
@@ -151,6 +184,7 @@ def isPaused() {
         if (now() < state.pausedUntil) return true
         state.remove("pausedUntil")
         logMessage("info", "Pause period ended, resuming.")
+        setVirtualThermostatMode("heat")
     }
     return false
 }
@@ -160,6 +194,7 @@ def pauseFor(hours) {
     state.pausedIndefinitely = false
     state.pausedUntil = now() + (h * 3600000L as Long)
     logMessage("info", "Paused for ${h} hours.")
+    setVirtualThermostatMode("off")
 }
 
 def pauseIndefinitely() {
@@ -167,12 +202,14 @@ def pauseIndefinitely() {
     state.remove("pausedUntil")
     state.pausedIndefinitely = true
     logMessage("info", "Paused indefinitely.")
+    setVirtualThermostatMode("off")
 }
 
 def resumeApp() {
     state.pausedIndefinitely = false
     state.remove("pausedUntil")
     logMessage("info", "Resumed.")
+    setVirtualThermostatMode("heat")
 }
 
 def appButtonHandler(btn) {
@@ -214,6 +251,7 @@ private void setupPauseDevices() {
 def subscribeSetpoint() {
     unsubscribe()
     if (thermostat) subscribe(thermostat, "heatingSetpoint", setpointHandler)
+    if (settings.setpointThermostat) subscribe(settings.setpointThermostat, "thermostatMode", modeHandler)
     setupPauseDevices()
 }
 
@@ -337,6 +375,7 @@ def controlLoop() {
 
     logMessage("debug", "Measured temperature: ${Tm_measured}")
 
+    def setpointDevice = getSetpointSource()
     if (setpointDevice) {
         Ts_setpoint = setpointDevice.currentValue("heatingSetpoint")
         if (Ts_setpoint != null) {
