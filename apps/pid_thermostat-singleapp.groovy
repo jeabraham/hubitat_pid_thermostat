@@ -37,6 +37,20 @@ preferences {
 }
 
 def mainPage() {
+    // Keep the virtual thermostat and the alternative setpoint device mutually exclusive
+    def curTherm = settings.setpointThermostat?.id
+    def curDev = settings.setpointDevice?.id
+    if (curTherm && curDev) {
+        if (curTherm != state.prevSetpointThermostat) {
+            app.removeSetting("setpointDevice")
+            curDev = null
+        } else {
+            app.removeSetting("setpointThermostat")
+            curTherm = null
+        }
+    }
+    state.prevSetpointThermostat = curTherm
+    state.prevSetpointDevice = curDev
     dynamicPage(name: "mainPage", title: "PID Thermostat", install: true, uninstall: true) {
         section("Logging Level:") {
             input "logLevel", "enum", title: "Select Log Level", options: ["trace", "debug", "info", "warn", "error"], defaultValue: "info", required: true
@@ -46,9 +60,9 @@ def mainPage() {
         }
         section("Select Setpoint Source:") {
             paragraph "<b>Recommended:</b> select a virtual thermostat (e.g. one created with Hubitat's \"Virtual Thermostat\" or \"Generic Component Thermostat\" driver). Its heating setpoint is used as the target, and its mode is linked to this app: when this app is paused the virtual thermostat's mode is set to <i>off</i>, setting it to <i>off</i> pauses this app indefinitely, and setting it to <i>heat</i> resumes this app."
-            input "setpointThermostat", "capability.thermostat", title: "Setpoint Virtual Thermostat (recommended)", required: false
+            input "setpointThermostat", "capability.thermostat", title: "Setpoint Virtual Thermostat (recommended)", required: false, submitOnChange: true
             paragraph "<i>Alternative (not recommended):</i> pick a temperature measurement device below and enter the set point manually in this app. You really should create a virtual thermostat instead; pause/resume mode syncing is only available with a virtual thermostat."
-            input "setpointDevice", "capability.sensor", title: "Alternative: Setpoint Device or Temperature Sensor", required: false
+            input "setpointDevice", "capability.sensor", title: "Alternative: Setpoint Device or Temperature Sensor", required: false, submitOnChange: true
             input "manualSetpoint", "decimal", title: "Manual Setpoint (If no device is specified)", required: false
         }
         section("PID Parameters:") {
