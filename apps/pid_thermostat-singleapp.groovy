@@ -186,6 +186,21 @@ def modeHandler(evt) {
     }
 }
 
+// On pause, put the controlled thermostat back at the real set point instead of leaving it at set point +/- delta
+private void restoreControlledSetpoint() {
+    def sp = null
+    def src = getSetpointSource()
+    if (src) sp = src.currentValue("heatingSetpoint")
+    else sp = settings.manualSetpoint
+    if (sp instanceof Number) {
+        logMessage("info", "Paused: setting controlled thermostat set point to ${sp}")
+        state.d_on_or_off = false
+        sendSetpoint(sp)
+    } else {
+        logMessage("warn", "Paused, but no numeric set point available to restore on the controlled thermostat.")
+    }
+}
+
 def pauseStatusText() {
     if (state.pausedIndefinitely) return "Paused indefinitely"
     if (state.pausedUntil && now() < state.pausedUntil) return "Paused until ${new Date(state.pausedUntil as Long)}"
@@ -203,20 +218,22 @@ def isPaused() {
     return false
 }
 
-def pauseFor(hours) {
+def pauseFor(hours, boolean restoreSetpoint = true) {
     def h = (hours instanceof Number && hours > 0) ? hours : 8
     state.pausedIndefinitely = false
     state.pausedUntil = now() + (h * 3600000L as Long)
     logMessage("info", "Paused for ${h} hours.")
     setVirtualThermostatMode("off")
+    if (restoreSetpoint) restoreControlledSetpoint()
 }
 
-def pauseIndefinitely() {
+def pauseIndefinitely(boolean restoreSetpoint = true) {
     state.pausedIndefinitely = false
     state.remove("pausedUntil")
     state.pausedIndefinitely = true
     logMessage("info", "Paused indefinitely.")
     setVirtualThermostatMode("off")
+    if (restoreSetpoint) restoreControlledSetpoint()
 }
 
 def resumeApp() {
@@ -293,7 +310,7 @@ def setpointHandler(evt) {
     }
     if (manualPauseMode == "no" || isPaused()) return
     logMessage("info", "Manual setpoint change to ${v} detected on device; pausing.")
-    if (manualPauseMode == "indefinitely") pauseIndefinitely() else pauseFor(settings.manualPauseHours)
+    if (manualPauseMode == "indefinitely") pauseIndefinitely(false) else pauseFor(settings.manualPauseHours, false)
 }
 
 def updated() {
