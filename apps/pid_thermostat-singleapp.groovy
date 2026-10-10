@@ -18,6 +18,9 @@
  *  V0.1 First tries
  *  V0.2 Fancier, with 5 point second derivative using Savitzky-Golay approximation
  *  V1.0 Seems to be working well.  Let's add a hub variable connection to display our duty cycle.  
+ *  V1.1 Added pause/resume (manual, timed, indefinite, virtual buttons) and virtual thermostat mode syncing.
+ *  V1.2 Measured temperature is now the average of one or more selected temperature sensors, and is pushed to the
+ *       setpoint virtual thermostat every minute (even while paused).
  *
  */
 
@@ -29,7 +32,7 @@ definition(
     category: "Green Living",
     iconUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat_V2/Advanced_vThermostat_V2-logo-small.png",
     iconX2Url: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat_V2/Advanced_vThermostat_V2-logo.png",
-    importUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat_V2/Advanced_vThermostat_V2-Child.groovy",
+    importUrl: "https://raw.githubusercontent.com/jeabraham/hubitat_pid_thermostat/main/apps/pid_thermostat-singleapp.groovy",
 )
 
 preferences {
