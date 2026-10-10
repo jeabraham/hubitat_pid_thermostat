@@ -37,7 +37,10 @@ and [Wikipedia article on Duty Cycle](https://en.wikipedia.org/wiki/Duty_cycle).
 ## **Features**
 
 - Configurable **PID parameters** (`Proportional`, `Integral`, `Derivative`) to tune your controller.
-- Supports a **manual setpoint** or one from a device such as a virtual thermostat.
+- Measured temperature is the **average of one or more temperature sensors** you choose.
+- Supports a **virtual thermostat** as the setpoint source (recommended), or a manual setpoint. The app keeps the virtual thermostat's temperature updated with the sensor average.
+- **Pause/resume**: pause manually, for a number of hours, or indefinitely; pausing can be triggered by a manual setpoint change on the controlled thermostat, app buttons, optional virtual buttons, or by setting the virtual thermostat's mode to `off` (setting it to `heat` resumes).
+- Optional restriction to specific hub Modes, and an optional hub variable showing the duty cycle.
 - Adjustable temperature threshold and cycle time.
 - Dynamic logging with levels (`trace`, `debug`, `info`, `warn`, `error`) for easy troubleshooting.
 - Anti-reset windup control to avoid PID saturation issues.
@@ -54,7 +57,7 @@ The app adjusts the targeted thermostat, turning it on by setting its heating te
 - **Integral Gain (I):** Reacts to accumulated errors over time to eliminate longer-term temperature deviations.
 - **Derivative Gain (D):** Reacts to the rate of temperature change, helping to stabilize overshooting.
 
-The app periodically (every minute) runs a control loop for continuous adjustments.
+The app runs a control loop every minute. Each run first reads the selected temperature sensors, averages them, and (if a virtual thermostat is configured) updates its temperature, even when paused; then, if not paused, it runs the PID calculation using that average.
 
 ---
 
@@ -63,7 +66,8 @@ The app periodically (every minute) runs a control loop for continuous adjustmen
 ### Prerequisites
 - **Hubitat Elevation** smart home hub.
 - A compatible thermostat device connected to the Hubitat hub.
-- (Optional) a hubitat device such as a virtual thermostat (supporting the heatingSetpoint attribute) or some other temperature attribute, for you to adjust the desired temperature (otherwise you can set it in the app directly)
+- One or more temperature sensors (`temperature` attribute); their average is used as the measured temperature.
+- (Recommended) a virtual thermostat (supporting `heatingSetpoint`, `thermostatMode` and the `setTemperature` command) to adjust the desired temperature. Without one, you enter the set point manually in the app and no device is updated with the averaged temperature.
 
 ### Using the Script
 1. Download or copy the Groovy file pid_thermostat-singleapp.groovy from the [GitHub repository](https://github.com/jeabraham/hubitat_pid_thermostat).
@@ -91,12 +95,15 @@ During setup in Hubitat, you will be asked to configure the following:
 2. **Thermostat Selection**  
    Select a thermostat device to control.
 
-3. **Setpoint Source**  
-   Specify how the setpoint is determined:
-    - Use a device which has a `heatingSetpoint` (e.g. a virtual thermostat) or `temperature` attribute for dynamic setpoint adjustments.
-    - Manually input a setpoint value.
+3. **Temperature Sensors** (required)  
+   Select one or more temperature sensors. The app uses the average of their readings as the measured temperature. If a setpoint virtual thermostat is selected, the app writes this average to its temperature every minute, including while paused. This replaces any Rule Machine rule you may have used for averaging.
 
-4. **PID Parameters**  
+4. **Setpoint Source**  
+   Specify how the setpoint is determined:
+    - **Recommended:** a virtual thermostat. Its `heatingSetpoint` is the target, and its mode is linked to the app (paused = `off`; setting `off` pauses indefinitely; setting `heat` resumes).
+    - Alternatively a device with a `heatingSetpoint` or `temperature` attribute (not recommended), or manually input a setpoint value. The virtual thermostat and alternative device are mutually exclusive.
+
+5. **PID Parameters**  
    Fine-tune the behavior of the PID controller.  Default values seem to work ok for thermostats in Celsius, they are probably too high for Fahrenheit. 
     - Proportional Gain (`P`) (Default: `0.25`)
     - Integral Gain (`I`) applied to error integral in degrees * hours (Default: `0.12`)
@@ -104,11 +111,20 @@ During setup in Hubitat, you will be asked to configure the following:
    
 Note that the Wikipedia article has tuning advice https://en.wikipedia.org/wiki/Proportional–integral–derivative_controller#Loop_tuning
 
-5. **Temperature Threshold**  
+6. **Temperature Threshold**  
    Specify the temperature delta used to adjust the thermostat’s setpoint when cycling. (Default: `4` degrees)
 
-6. **Cycle Time**  
+7. **Cycle Time**  
    Define the time interval for the duty cycle in seconds. For example, a `1200`-second cycle will adjust the heat every 20 minutes. Since the loop currently runs every minute, this should probably not be less than 600 seconds. (Default: `1200` seconds)
+
+8. **Duty Cycle Hub Variable** (optional)  
+   A hub variable connector that displays the duty cycle as a percentage (-1 if unavailable).
+
+9. **Pause Control**  
+   Choose whether a manual setpoint change on the controlled thermostat pauses the app (no / for N hours / indefinitely), the default pause length for "Pause now", and optionally create virtual buttons (Pause Now, Pause Indefinitely, Resume) for dashboards. When paused, the controlled thermostat is returned to the real set point.
+
+10. **Modes** (optional)  
+   Only run in the selected hub Modes.
 
 ---
 
@@ -129,6 +145,10 @@ Logs will appear in the Hubitat log interface for easy monitoring.
 ## **Version History**
 
 - **V0.1**: Initial release – core functionality for PID-based thermostat adjustments.
+- **V0.2**: Five-point Savitzky-Golay second derivative estimate.
+- **V1.0**: Hub variable output for duty cycle.
+- **V1.1**: Pause/resume and virtual thermostat mode syncing.
+- **V1.2**: Average of multiple temperature sensors, pushed to the virtual thermostat every minute.
 
 ---
 

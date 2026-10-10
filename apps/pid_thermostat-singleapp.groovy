@@ -18,6 +18,9 @@
  *  V0.1 First tries
  *  V0.2 Fancier, with 5 point second derivative using Savitzky-Golay approximation
  *  V1.0 Seems to be working well.  Let's add a hub variable connection to display our duty cycle.  
+ *  V1.1 Added pause/resume (manual, timed, indefinite, virtual buttons) and virtual thermostat mode syncing.
+ *  V1.2 Measured temperature is now the average of one or more selected temperature sensors, and is pushed to the
+ *       setpoint virtual thermostat every minute (even while paused).
  *
  */
 
@@ -29,7 +32,7 @@ definition(
     category: "Green Living",
     iconUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat_V2/Advanced_vThermostat_V2-logo-small.png",
     iconX2Url: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat_V2/Advanced_vThermostat_V2-logo.png",
-    importUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat_V2/Advanced_vThermostat_V2-Child.groovy",
+    importUrl: "https://raw.githubusercontent.com/jeabraham/hubitat_pid_thermostat/main/apps/pid_thermostat-singleapp.groovy",
 )
 
 preferences {
@@ -57,6 +60,10 @@ def mainPage() {
         }
         section("Select Thermostat to control") {
             input "thermostat", "capability.thermostat", title: "Thermostat", required: true
+        }
+        section("Temperature Sensors:") {
+            paragraph "The average of the selected sensors is used as the measured temperature. If a setpoint virtual thermostat is selected, its temperature is updated with this average every minute, even while this app is paused."
+            input "tempSensors", "capability.temperatureMeasurement", title: "Temperature Sensor(s)", multiple: true, required: true
         }
         section("Select Setpoint Source:") {
             paragraph "<b>Recommended:</b> select a virtual thermostat (e.g. one created with Hubitat's \"Virtual Thermostat\" or \"Generic Component Thermostat\" driver). Its heating setpoint is used as the target, and its mode is linked to this app: when this app is paused the virtual thermostat's mode is set to <i>off</i>, setting it to <i>off</i> pauses this app indefinitely, and setting it to <i>heat</i> resumes this app."
@@ -370,8 +377,38 @@ def disableApp() {
     unschedule()
 }
 
+def getAverageTemperature() {
+    def vals = (settings.tempSensors ?: []).collect { it.currentValue("temperature") }.findAll { it != null }.collect { it as BigDecimal }
+    if (!vals) return null
+    return vals.sum() / vals.size()
+}
+
+// Runs every minute (even when paused); returns the averaged measured temperature
+private updateMeasuredTemperature() {
+    def avg = getAverageTemperature()
+    if (avg == null) {
+        logMessage("warn", "No valid temperature readings from the selected sensors.")
+        return null
+    }
+    avg = avg.setScale(2, BigDecimal.ROUND_HALF_UP)
+    def vt = settings.setpointThermostat
+    if (vt) {
+        try {
+            def cur = vt.currentValue("temperature")
+            if (cur == null || Math.abs((cur as BigDecimal) - avg) >= 0.005) {
+                vt.setTemperature(avg)
+                logMessage("debug", "Updated ${vt} temperature to ${avg}")
+            }
+        } catch (Throwable e) {
+            logMessage("warn", "Could not set temperature on ${vt}: ${e.message}")
+        }
+    }
+    return avg
+}
+
 def controlLoop() {
     logMessage("trace", "Starting control loop...")
+    def Tm_avg = updateMeasuredTemperature()
     if (isPaused()) {
         logMessage("debug", "App is paused: ${pauseStatusText()}")
         return
@@ -397,7 +434,7 @@ def controlLoop() {
     // since we are running once per minute, delta_t is 1.0 (note have to use 1.0 not 1!)
     def delta_t = 1.0
 
-    def Tm_measured = thermostat.currentTemperature
+    def Tm_measured = Tm_avg
 
     if (Tm_measured == null || !(Tm_measured instanceof Number)) {
             logMessage("error", "Thermostat temperature is not a valid number.")
