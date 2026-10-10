@@ -60,6 +60,22 @@ def mainPage() {
         section(title: "Connections") {
                 input(name: "dutyCycleDevice", type: "capability.actuator", title: "Select Duty Cycle Hub Variable (display/output only)", required: false)
         }
+        section("Pause Control:") {
+            input "manualPauseMode", "enum", title: "Pause when set point is changed manually on the device", options: ["no": "No", "hours": "Yes, for a number of hours", "indefinitely": "Yes, indefinitely"], defaultValue: "hours", required: true, submitOnChange: true
+            if (manualPauseMode != "no" && manualPauseMode != "indefinitely") {
+                input "manualPauseHours", "decimal", title: "Hours to pause after a manual change", defaultValue: 8
+            }
+            input "pauseNowHours", "decimal", title: "Hours to pause for when pressing \"Pause now\"", defaultValue: 8
+            input "createPauseDevices", "bool", title: "Create virtual buttons (Pause Now, Pause Indefinitely, Resume) for use on dashboards", defaultValue: false
+            paragraph "Status: <b>${pauseStatusText()}</b>"
+            input "pauseNowBtn", "button", title: "Pause now"
+            input "pauseIndefBtn", "button", title: "Pause indefinitely"
+            if (isPaused()) {
+                input "resumeBtn", "button", title: "Resume"
+            } else {
+                paragraph "Resume is only available while paused."
+            }
+        }
         section(title: "Modes") {
             input(name: "modes", type: "mode", title: "Set for specific Mode(s)", multiple: true, required: false)
         }
@@ -123,6 +139,111 @@ private void validateErrorHistory() {
     }
 }
 
+def pauseStatusText() {
+    if (state.pausedIndefinitely) return "Paused indefinitely"
+    if (state.pausedUntil && now() < state.pausedUntil) return "Paused until ${new Date(state.pausedUntil as Long)}"
+    return "Running"
+}
+
+def isPaused() {
+    if (state.pausedIndefinitely) return true
+    if (state.pausedUntil) {
+        if (now() < state.pausedUntil) return true
+        state.remove("pausedUntil")
+        logMessage("info", "Pause period ended, resuming.")
+    }
+    return false
+}
+
+def pauseFor(hours) {
+    def h = (hours instanceof Number && hours > 0) ? hours : 8
+    state.pausedIndefinitely = false
+    state.pausedUntil = now() + (h * 3600000L as Long)
+    logMessage("info", "Paused for ${h} hours.")
+}
+
+def pauseIndefinitely() {
+    state.pausedIndefinitely = false
+    state.remove("pausedUntil")
+    state.pausedIndefinitely = true
+    logMessage("info", "Paused indefinitely.")
+}
+
+def resumeApp() {
+    state.pausedIndefinitely = false
+    state.remove("pausedUntil")
+    logMessage("info", "Resumed.")
+}
+
+def appButtonHandler(btn) {
+    switch (btn) {
+        case "pauseNowBtn": pauseFor(settings.pauseNowHours); break
+        case "pauseIndefBtn": pauseIndefinitely(); break
+        case "resumeBtn": resumeApp(); break
+    }
+}
+
+def pauseDeviceHandler(evt) {
+    switch (evt.value) {
+        case "1": pauseFor(settings.pauseNowHours); break
+        case "2": pauseIndefinitely(); break
+        case "3": resumeApp(); break
+    }
+}
+
+private void setupPauseDevices() {
+    def names = ["PauseNow": "PID Pause Now", "PauseIndefinitely": "PID Pause Indefinitely", "Resume": "PID Resume"]
+    names.each { key, label ->
+        def dni = "pidpause-${app.id}-${key}"
+        def dev = getChildDevice(dni)
+        if (settings.createPauseDevices) {
+            if (!dev) {
+                try {
+                    dev = addChildDevice("hubitat", "Virtual Button", dni, [name: label, label: label, isComponent: false])
+                } catch (Throwable e) {
+                    logMessage("error", "Could not create ${label}: ${e.message}")
+                }
+            }
+            if (dev) subscribe(dev, "pushed", pauseDeviceHandler)
+        } else if (dev) {
+            deleteChildDevice(dni)
+        }
+    }
+}
+
+def subscribeSetpoint() {
+    unsubscribe()
+    if (thermostat) subscribe(thermostat, "heatingSetpoint", setpointHandler)
+    setupPauseDevices()
+}
+
+private void sendSetpoint(val) {
+    if (!(state.recentCommands instanceof List)) state.recentCommands = []
+    state.recentCommands = (state.recentCommands.findAll { now() - it.t < 600000 } + [[v: val as BigDecimal, t: now()]])
+    thermostat.setHeatingSetpoint(val)
+}
+
+def setpointHandler(evt) {
+    def v = evt.numberValue
+    if (v == null) return
+    // Ignore changes made by this app (value matches a recent command)
+    def mine = (state.recentCommands instanceof List) && state.recentCommands.any {
+        now() - it.t < 600000 && Math.abs(it.v - v) < 0.3
+    }
+    if (mine) {
+        logMessage("debug", "Setpoint change to ${v} was made by this app; ignoring.")
+        return
+    }
+    // Changes sent digitally (by other apps/rules) are not treated as manual
+    if (evt.type == "digital") {
+        logMessage("debug", "Setpoint change to ${v} was digital (not physical); ignoring.")
+        return
+    }
+    if (manualPauseMode == "no" || isPaused()) return
+    logMessage("info", "Manual setpoint change to ${v} detected on device; pausing.")
+    if (manualPauseMode == "indefinitely") pauseIndefinitely() else pauseFor(settings.manualPauseHours)
+}
+
 def updated() {
     state.HISTORY_SIZE = 7  // Also set in initialize()
     unschedule()
@@ -156,6 +277,7 @@ def updated() {
         state.d_on_or_off = false
     }
     runEvery1Minute(controlLoop)
+    subscribeSetpoint()
 }
 
 def initialize() {
@@ -166,6 +288,7 @@ def initialize() {
     validateErrorHistory()
     state.d_on_or_off = false
     runEvery1Minute(controlLoop)
+    subscribeSetpoint()
 }
 
 def uninstalled() {
@@ -180,6 +303,10 @@ def disableApp() {
 
 def controlLoop() {
     logMessage("trace", "Starting control loop...")
+    if (isPaused()) {
+        logMessage("debug", "App is paused: ${pauseStatusText()}")
+        return
+    }
     try {
         def allowedModes = settings.modes
         if (allowedModes && !allowedModes.contains(location.mode)) {
@@ -324,7 +451,7 @@ def controlLoop() {
         state.d_on_or_off = false
         // perhaps sending commands too quickly was confusing it, let's just send one. 
         //thermostat.setThermostatMode("heat")
-        thermostat.setHeatingSetpoint(TL_low)
+        sendSetpoint(TL_low)
         //thermostat.setThermostatFanMode("auto")
     }
 
@@ -338,7 +465,7 @@ def controlLoop() {
         state.d_on_or_off = true
         // perhaps sending commands too quickly was confusing it, let's just send one. 
         //thermostat.setThermostatMode("heat")
-        thermostat.setHeatingSetpoint(TH_high)
+        sendSetpoint(TH_high)
         //thermostat.setThermostatFanMode("auto")
     }
 
